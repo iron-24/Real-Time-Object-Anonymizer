@@ -1,0 +1,17 @@
+# Core ML/CV dependencies
+torch>=2.3.0
+torchvision>=0.18.0
+ultralytics>=8.3.0
+opencv-python>=4.10.0.84
+
+# UI and utilities
+gradio>=4.44.0
+Pillow>=10.4.0
+numpy>=1.26.0
+
+# Model hosting (for Phase 4)
+huggingface-hub>=0.24.0
+
+# Training utilities (optional, for Colab)
+# wandb>=0.17.0
+# roboflow>=1.1.0
