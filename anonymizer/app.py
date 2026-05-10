@@ -5,12 +5,15 @@ A portfolio project demonstrating real-time computer vision for privacy protecti
 Detects and anonymizes faces, license plates, and screens in webcam/video streams.
 
 [INTERVIEW TALKING POINT]: Gradio chosen over custom React UI for rapid prototyping
-and deployment. Provides professional UI with webcam support, file upload, and real-time
-streaming out of the box. Perfect for MVP and technical demos.
+and deployment. Provides professional UI with real-time display out of the box.
+
+Architecture note: In Gradio 6.x the browser webcam component sends individual
+snapshots, not a continuous stream. We capture directly from the camera using
+OpenCV (cv2.VideoCapture) and push processed frames to the UI via gr.Timer.
+This gives true real-time performance independent of Gradio's webcam API changes.
 """
 
-from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional
 import logging
 
 import gradio as gr
@@ -22,7 +25,6 @@ from anonymizer import Anonymizer, AnonymizationEffect
 from utils import FPSCounter, draw_fps, validate_frame
 
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -34,55 +36,71 @@ class AnonymizerApp:
     """
     Main application class for real-time anonymization.
 
-    Handles webcam streaming, video processing, and Gradio UI interactions.
+    Captures frames from the webcam via OpenCV and processes them on each
+    gr.Timer tick. UI controls update instance variables which are read on
+    the next frame, so no extra synchronisation is needed.
     """
 
     def __init__(self):
-        """Initialize detector and state."""
-        # Phase 1: Use Haar Cascade for face detection (fast, built-in)
-        # Phase 2+: Will upgrade to fine-tuned YOLOv8
         self.face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         )
+        if self.face_cascade.empty():
+            logger.error("[App] Haar Cascade failed to load — check OpenCV install")
+        else:
+            logger.info("[App] Haar Cascade loaded successfully")
 
-        # Will be initialized when needed to avoid loading during import
         self.detector = None
-
-        # FPS tracking
         self.fps_counter = FPSCounter(window_size=30)
+
+        # Open the default webcam
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            logger.error("[App] Failed to open webcam (device 0)")
+        else:
+            logger.info("[App] Webcam opened successfully")
+
+        # Current settings — updated by UI controls via update_settings()
+        self.anonymize_faces = True
+        self.effect = "blur"
+        self.intensity = 7
+        self.confidence = 0.4
+        self.show_boxes = False
 
         logger.info("[App] Initialized successfully")
 
-    def _ensure_detector_loaded(self) -> None:
-        """Lazy load detector to avoid unnecessary model loading."""
-        if self.detector is None:
-            logger.info("[App] Loading YOLOv8 detector...")
-            self.detector = AnonymizerDetector(
-                model_path=None,  # Will download yolov8n.pt
-                confidence_threshold=0.4
-            )
-            logger.info("[App] Detector loaded")
+    def update_settings(
+        self,
+        anonymize_faces: bool,
+        effect: str,
+        intensity: float,
+        confidence: float,
+        show_boxes: bool,
+    ) -> None:
+        """Called whenever a UI control changes."""
+        self.anonymize_faces = anonymize_faces
+        self.effect = effect
+        self.intensity = int(intensity)
+        self.confidence = confidence
+        self.show_boxes = show_boxes
 
-    def detect_faces(self, frame: np.ndarray, confidence: float) -> list:
+    def detect_faces(self, frame: np.ndarray) -> list:
         """
         Detect faces using Haar Cascade (Phase 1 implementation).
 
         [INTERVIEW TALKING POINT]: Using Haar Cascades for Phase 1 because:
         1. Zero-cost inference (CPU-based, no GPU needed for this part)
         2. Fast enough for real-time (< 5ms per frame)
-        3. Good enough for MVP - will upgrade to YOLOv8-face in Phase 2 for better accuracy
+        3. Good enough for MVP — will upgrade to YOLOv8-face in Phase 2
 
         Args:
             frame: Input frame in BGR format.
-            confidence: Confidence threshold (not used for Haar, kept for API consistency).
 
         Returns:
             List of Detection objects for faces.
         """
-        # Convert to grayscale for Haar Cascade
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Detect faces
         faces = self.face_cascade.detectMultiScale(
             gray,
             scaleFactor=1.1,
@@ -90,140 +108,66 @@ class AnonymizerApp:
             minSize=(30, 30)
         )
 
-        # Convert to Detection objects
+        n = len(faces) if hasattr(faces, '__len__') else 0
+        if n > 0:
+            logger.info(f"[App] Detected {n} face(s)")
+
         detections = []
         for (x, y, w, h) in faces:
             detections.append(Detection(
                 bbox=(x, y, x + w, y + h),
-                confidence=1.0,  # Haar doesn't provide confidence scores
+                confidence=1.0,
                 class_name="face",
                 class_id=0
             ))
-
         return detections
 
-    def process_frame(
-        self,
-        frame: np.ndarray,
-        anonymize_faces: bool,
-        anonymize_plates: bool,
-        anonymize_screens: bool,
-        effect: str,
-        intensity: int,
-        confidence: float,
-        show_boxes: bool
-    ) -> np.ndarray:
+    def get_frame(self) -> Optional[np.ndarray]:
         """
-        Process a single frame with anonymization.
+        Capture and process one frame from the webcam.
 
-        Args:
-            frame: Input frame (BGR).
-            anonymize_faces: Whether to anonymize faces.
-            anonymize_plates: Whether to anonymize license plates (Phase 2+).
-            anonymize_screens: Whether to anonymize screens (Phase 3+).
-            effect: Anonymization effect name.
-            intensity: Effect intensity (1-10).
-            confidence: Detection confidence threshold.
-            show_boxes: Whether to draw bounding boxes for debugging.
-
-        Returns:
-            Processed frame with anonymization applied.
+        Called on every gr.Timer tick (~30 FPS). Returns an RGB numpy array
+        for Gradio to display, or None if the camera isn't ready.
         """
-        if not validate_frame(frame):
-            logger.warning("[App] Invalid frame received")
-            return frame
+        ret, frame = self.cap.read()
+        if not ret or frame is None:
+            logger.warning("[App] Failed to read frame from webcam")
+            return None
 
-        # Update FPS
         self.fps_counter.update()
 
-        # Collect all detections
         all_detections = []
 
-        # Phase 1: Face detection
-        if anonymize_faces:
-            face_detections = self.detect_faces(frame, confidence)
-            all_detections.extend(face_detections)
+        if self.anonymize_faces:
+            all_detections.extend(self.detect_faces(frame))
 
-        # Phase 2: License plate detection (placeholder)
-        if anonymize_plates:
-            # TODO: Implement in Phase 2 with fine-tuned YOLOv8
-            pass
+        # Phase 2 / 3 placeholders
+        # if self.anonymize_plates: ...
+        # if self.anonymize_screens: ...
 
-        # Phase 3: Screen detection (placeholder)
-        if anonymize_screens:
-            # TODO: Implement in Phase 3 with two-stage detection
-            pass
+        effect_enum = AnonymizationEffect[self.effect.upper()]
 
-        # Parse effect enum
-        effect_enum = AnonymizationEffect[effect.upper()]
-
-        # Apply anonymization to each detection
         for detection in all_detections:
             frame = Anonymizer.apply_effect(
                 frame,
                 detection.bbox,
                 effect_enum,
-                intensity
+                self.intensity
             )
 
-        # Draw bounding boxes if debugging mode enabled
-        if show_boxes:
+        if self.show_boxes:
             frame = Anonymizer.draw_bounding_boxes(
-                frame,
-                all_detections,
-                color=(0, 255, 0),
-                thickness=2
+                frame, all_detections, color=(0, 255, 0), thickness=2
             )
 
-        # Draw FPS counter
-        fps = self.fps_counter.get_fps()
-        frame = draw_fps(frame, fps)
+        frame = draw_fps(frame, self.fps_counter.get_fps())
 
-        return frame
-
-    def webcam_handler(
-        self,
-        frame: np.ndarray,
-        anonymize_faces: bool,
-        anonymize_plates: bool,
-        anonymize_screens: bool,
-        effect: str,
-        intensity: float,
-        confidence: float,
-        show_boxes: bool
-    ) -> np.ndarray:
-        """
-        Handler for Gradio webcam stream.
-
-        Args:
-            frame: Webcam frame from Gradio.
-            (other args): UI control values.
-
-        Returns:
-            Processed frame.
-        """
-        # Convert intensity to int
-        intensity = int(intensity)
-
-        return self.process_frame(
-            frame,
-            anonymize_faces,
-            anonymize_plates,
-            anonymize_screens,
-            effect,
-            intensity,
-            confidence,
-            show_boxes
-        )
+        # OpenCV is BGR; Gradio expects RGB
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
 def create_ui() -> gr.Blocks:
-    """
-    Create Gradio interface.
-
-    Returns:
-        Gradio Blocks interface.
-    """
+    """Create Gradio interface."""
     app = AnonymizerApp()
 
     with gr.Blocks(title="Real-Time Object Anonymizer") as demo:
@@ -239,31 +183,25 @@ def create_ui() -> gr.Blocks:
 
         with gr.Row():
             with gr.Column(scale=2):
-                # Webcam input
-                webcam = gr.Image(
-                    sources=["webcam"],
-                    streaming=True,
+                output_image = gr.Image(
                     type="numpy",
-                    label="Webcam Feed"
+                    label="Live Feed (processed)",
                 )
 
             with gr.Column(scale=1):
                 gr.Markdown("### Detection Settings")
 
-                # Object selection
                 anonymize_faces = gr.Checkbox(
                     value=True,
                     label="Anonymize Faces",
                     info="Detect and blur faces (Phase 1: Active)"
                 )
-
                 anonymize_plates = gr.Checkbox(
                     value=False,
                     label="Anonymize License Plates",
                     info="Detect and blur plates (Phase 2: Coming soon)",
                     interactive=False
                 )
-
                 anonymize_screens = gr.Checkbox(
                     value=False,
                     label="Anonymize Screens/Monitors",
@@ -279,12 +217,8 @@ def create_ui() -> gr.Blocks:
                     label="Effect Type",
                     info="Choose how to anonymize detected objects"
                 )
-
                 intensity = gr.Slider(
-                    minimum=1,
-                    maximum=10,
-                    value=7,
-                    step=1,
+                    minimum=1, maximum=10, value=7, step=1,
                     label="Effect Intensity",
                     info="Higher = stronger effect"
                 )
@@ -292,14 +226,10 @@ def create_ui() -> gr.Blocks:
                 gr.Markdown("### Advanced Settings")
 
                 confidence = gr.Slider(
-                    minimum=0.1,
-                    maximum=0.9,
-                    value=0.4,
-                    step=0.05,
+                    minimum=0.1, maximum=0.9, value=0.4, step=0.05,
                     label="Confidence Threshold",
                     info="Min confidence for detections (YOLOv8 only)"
                 )
-
                 show_boxes = gr.Checkbox(
                     value=False,
                     label="Show Bounding Boxes",
@@ -316,29 +246,21 @@ def create_ui() -> gr.Blocks:
         - **Detection**: YOLOv8 nano (Ultralytics) + OpenCV Haar Cascades
         - **Inference**: PyTorch with MPS backend (Apple Silicon GPU acceleration)
         - **Effects**: Custom OpenCV implementations (Gaussian blur, pixelation, redaction)
-        - **UI**: Gradio with streaming webcam support
+        - **UI**: Gradio with real-time OpenCV capture via gr.Timer
 
         **Performance**: 15-30 FPS on Apple Silicon M-series chips
 
         [View on GitHub](#) | [Model on HuggingFace](#) | [Read Blog Post](#)
         """)
 
-        # Connect webcam stream to processing pipeline
-        webcam.stream(
-            fn=app.webcam_handler,
-            inputs=[
-                webcam,
-                anonymize_faces,
-                anonymize_plates,
-                anonymize_screens,
-                effect,
-                intensity,
-                confidence,
-                show_boxes
-            ],
-            outputs=webcam,
-            show_progress="hidden"  # Hide progress bar for smoother streaming
-        )
+        # Timer drives the processing loop (~30 FPS)
+        timer = gr.Timer(value=1 / 30, active=True)
+        timer.tick(fn=app.get_frame, outputs=[output_image])
+
+        # Sync UI controls → app settings on any change
+        controls = [anonymize_faces, effect, intensity, confidence, show_boxes]
+        for ctrl in controls:
+            ctrl.change(fn=app.update_settings, inputs=controls, outputs=[])
 
     return demo
 
@@ -346,12 +268,11 @@ def create_ui() -> gr.Blocks:
 if __name__ == "__main__":
     logger.info("[Main] Starting Real-Time Object Anonymizer")
 
-    # Create and launch UI
     demo = create_ui()
-
+    demo.queue()
     demo.launch(
         server_name="127.0.0.1",
         server_port=7860,
-        share=False,  # Set to True to create public link
+        share=False,
         show_error=True
     )

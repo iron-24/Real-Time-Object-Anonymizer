@@ -14,7 +14,7 @@ A real-time computer vision application that automatically detects and anonymize
 ## Quick Start
 
 ```bash
-# Clone and navigate to project
+# Navigate to the project directory
 cd anonymizer
 
 # Activate virtual environment
@@ -24,26 +24,29 @@ source venv/bin/activate
 python app.py
 ```
 
-Open your browser to `http://127.0.0.1:7860` and grant webcam permissions.
+Open your browser to `http://127.0.0.1:7860`.
+
+> **macOS note**: The first time you run the app, macOS will prompt Terminal for camera access. If no prompt appears and the feed is blank, go to **System Settings → Privacy & Security → Camera** and enable Terminal manually, then restart the app.
 
 ## Features
 
-- ✅ **Real-time face detection and anonymization** (Phase 1 - Active)
+- ✅ **Real-time face detection and anonymization** (Phase 1 - Complete)
 - ⏳ **License plate detection** (Phase 2 - Coming Soon)
 - ⏳ **Screen/monitor detection** (Phase 3 - Coming Soon)
 - 🎨 **Multiple anonymization effects**: Gaussian blur, pixelation, solid blackout
 - ⚡ **Apple Silicon optimized**: Uses MPS backend for GPU acceleration
-- 🖥️ **Web interface**: Professional Gradio UI with webcam streaming
+- 🖥️ **Web interface**: Professional Gradio UI with live webcam feed
 - 📊 **Performance monitoring**: Real-time FPS counter
 
 ## Tech Stack
 
 | Component | Technology | Why This Choice |
 |-----------|-----------|-----------------|
-| **Detection** | YOLOv8 nano + OpenCV Haar Cascades | Real-time inference speed (15-30 FPS on M-series) while maintaining accuracy. Nano variant chosen over larger models for 3-5x faster inference with only 2-3% mAP drop. |
-| **Inference Backend** | PyTorch with MPS | Apple Silicon GPU acceleration provides 2-3x speedup over CPU. Automatic fallback to CPU for non-Apple hardware. |
-| **Anonymization** | Custom OpenCV implementations | Pixelation uses bilinear downsampling + nearest-neighbor upsampling - perceptually effective and 10x faster than mosaic algorithms. |
-| **UI Framework** | Gradio | Rapid prototyping with professional UI. Provides webcam streaming, file upload, and real-time controls out of the box. |
+| **Detection** | OpenCV Haar Cascades | Zero GPU cost, <5ms inference, good enough for MVP. Upgrade path to YOLOv8-face in Phase 2. |
+| **Inference Backend** | PyTorch with MPS | Apple Silicon GPU acceleration provides 2-3x speedup over CPU for future YOLO inference. Automatic fallback to CPU. |
+| **Anonymization** | Custom OpenCV implementations | Pixelation uses bilinear downsampling + nearest-neighbor upsampling — perceptually effective and 10x faster than mosaic algorithms. |
+| **Webcam Capture** | OpenCV `cv2.VideoCapture` | Captures directly from the camera in Python. More reliable than browser-based streaming, which changed behaviour in Gradio 5.x/6.x. |
+| **UI Framework** | Gradio + `gr.Timer` | `gr.Timer` fires `get_frame()` at ~30 FPS and pushes processed frames to the display, giving true real-time output without depending on Gradio's webcam streaming API. |
 | **Training** | Google Colab (free tier) | Fine-tuning YOLOv8 on custom datasets for license plates (Phase 2) and screens (Phase 3). |
 | **Deployment** | HuggingFace Spaces | Free hosting with Gradio SDK support. |
 
@@ -52,43 +55,50 @@ Open your browser to `http://127.0.0.1:7860` and grant webcam permissions.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Gradio Web Interface                     │
-│  (Webcam Input • Effect Controls • Real-time Streaming)     │
+│        (Live Feed Display • Effect Controls • FPS)          │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+                         │  gr.Timer (~30 FPS)
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   Frame Processing Pipeline                  │
 │                                                              │
 │  ┌──────────────┐      ┌─────────────┐      ┌────────────┐ │
 │  │   Detector   │ ───▶ │ Anonymizer  │ ───▶ │  Display   │ │
-│  │  (MPS/CPU)   │      │  (OpenCV)   │      │ (+ FPS)    │ │
+│  │  (Haar/MPS)  │      │  (OpenCV)   │      │ (+ FPS)    │ │
 │  └──────────────┘      └─────────────┘      └────────────┘ │
+│         ▲                                                    │
 │         │                                                    │
-│         ├─ Phase 1: Haar Cascade (faces)                   │
-│         ├─ Phase 2: YOLOv8 fine-tuned (license plates)    │
-│         └─ Phase 3: Two-stage (screens)                    │
+│  ┌──────────────┐                                           │
+│  │ cv2.VideoCapture(0)  ← camera captured in Python        │
+│  └──────────────┘                                           │
+│                                                              │
+│         ├─ Phase 1: Haar Cascade (faces)                    │
+│         ├─ Phase 2: YOLOv8 fine-tuned (license plates)     │
+│         └─ Phase 3: Two-stage (screens)                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Key Architectural Decision: OpenCV Capture vs Browser Webcam
+
+Gradio 5.x/6.x changed webcam streaming behaviour — `gr.Image(streaming=True)` no longer continuously sends frames to Python; it sends a single snapshot when the user clicks. For true real-time processing we capture frames directly in Python with `cv2.VideoCapture(0)` and push them to the UI with `gr.Timer`. This decouples the processing pipeline from Gradio's ever-changing webcam API.
+
 ## Project Phases
 
-### ✅ Phase 1: Core Detection Pipeline (Current)
+### ✅ Phase 1: Core Detection Pipeline (Complete)
 **Goal**: Real-time face detection and anonymization
 
-**Status**: Complete
 - [x] Project structure and dependencies
-- [x] YOLOv8 detector wrapper with MPS support
 - [x] Three anonymization effects (blur, pixelate, blackout)
-- [x] Gradio web interface with webcam streaming
-- [x] FPS monitoring and performance optimization
 - [x] Face detection using OpenCV Haar Cascades
+- [x] Gradio web interface with real-time display via `gr.Timer`
+- [x] FPS monitoring and performance optimization
+- [x] YOLOv8 detector wrapper with MPS support (ready for Phase 2)
 
 **Performance**: 20-30 FPS on Apple M-series chips
 
 ### ⏳ Phase 2: License Plate Detection (Days 4-7)
 **Goal**: Fine-tune YOLOv8 for license plate detection
 
-**Plan**:
 - Google Colab training notebook
 - Roboflow "License Plate Recognition" dataset (~5k images)
 - Fine-tune YOLOv8n with custom head
@@ -98,7 +108,6 @@ Open your browser to `http://127.0.0.1:7860` and grant webcam permissions.
 ### ⏳ Phase 3: Screen Detection (Days 8-10)
 **Goal**: Two-stage detection for screens/monitors
 
-**Plan**:
 - Stage 1: OpenCV contour detection (fast rectangular region filtering)
 - Stage 2: MobileNetV3 classifier (screen vs non-screen)
 - Colab training on Open Images Dataset
@@ -107,7 +116,6 @@ Open your browser to `http://127.0.0.1:7860` and grant webcam permissions.
 ### ⏳ Phase 4: Polish and Ship (Days 11-14)
 **Goal**: Production deployment
 
-**Plan**:
 - Video file upload support
 - HuggingFace model card and deployment
 - Performance benchmarks and documentation
@@ -117,37 +125,37 @@ Open your browser to `http://127.0.0.1:7860` and grant webcam permissions.
 
 ### Prerequisites
 - macOS with Apple Silicon (M1/M2/M3) for MPS acceleration
-- Python 3.10-3.11 (managed via pyenv in this project)
-- Webcam for real-time testing
+- Python 3.10+ (project uses 3.14)
+- Webcam
 
 ### Setup
 
-1. **Environment is already set up** (if you're reading this, the venv exists)
+1. **Environment is already set up** (venv exists at `anonymizer/venv/`)
 
-2. **Verify installation**:
+2. **Grant camera access** to Terminal in System Settings → Privacy & Security → Camera
+
+3. **Verify MPS availability**:
 ```bash
 source venv/bin/activate
 python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available()}')"
 ```
 
-3. **Run the app**:
+4. **Run the app**:
 ```bash
 python app.py
 ```
 
-The app will automatically download YOLOv8n weights (~6MB) on first run.
-
 ## Usage
 
-### Webcam Mode (Real-time)
+### Live Webcam Mode
 
-1. Launch the app: `python app.py`
+1. Launch: `python app.py`
 2. Open browser to `http://127.0.0.1:7860`
-3. Click "Allow" when prompted for webcam access
+3. The processed feed appears immediately (no browser camera permission needed)
 4. Adjust settings:
    - **Effect Type**: Blur (Gaussian), Pixelate (blocky), or Blackout (solid)
-   - **Intensity**: 1 (minimal) to 10 (maximum anonymization)
-   - **Show Bounding Boxes**: Enable to see detection boxes (debug mode)
+   - **Intensity**: 1 (minimal) to 10 (maximum)
+   - **Show Bounding Boxes**: Enable to see detection regions (debug mode)
 
 ### Video File Mode (Coming in Phase 4)
 Upload `.mp4`, `.mov`, or `.avi` files for batch processing.
@@ -166,54 +174,47 @@ Benchmarks on **MacBook Pro M2** (2023):
 
 ## Interview Talking Points
 
-Key architectural decisions made deliberately for discussion:
+1. **Haar Cascades for Phase 1 faces**
+   Zero GPU cost, <5ms inference. Pragmatic MVP choice with a clear upgrade path to YOLOv8-face in Phase 2 for better accuracy across demographics and angles.
 
-1. **YOLOv8 nano over larger variants**
+2. **OpenCV capture over browser webcam**
+   Gradio's webcam streaming API changed in 5.x/6.x — it now sends snapshots on click rather than a continuous stream. Capturing via `cv2.VideoCapture` in Python and driving the UI with `gr.Timer` gives true real-time performance that is independent of Gradio's frontend changes.
+
+3. **YOLOv8 nano over larger variants**
    Trades 2-3% mAP for 3-5x faster inference. Essential for real-time performance on consumer hardware.
 
-2. **MPS backend with CPU fallback**
+4. **MPS backend with CPU fallback**
    Apple Silicon GPU acceleration (2-3x speedup) with automatic degradation for portability.
 
-3. **Two-stage screen detection (Phase 3)**
+5. **Two-stage screen detection (Phase 3)**
    Contour detection filters candidates → lightweight classifier validates. Faster and more interpretable than end-to-end approaches.
 
-4. **Pixelation via resize operations**
+6. **Pixelation via resize operations**
    Downscale (bilinear) → upscale (nearest-neighbor). Creates blocky effect perceptually equivalent to mosaic algorithms but 10x faster.
-
-5. **Gradio over custom React UI**
-   MVP-first approach. Gradio provides production-quality UI (webcam streaming, file upload, real-time controls) in ~100 lines vs. thousands for custom frontend.
-
-6. **Haar Cascades for Phase 1 faces**
-   Zero GPU cost, <5ms inference, good enough for MVP. Upgrade path to YOLOv8-face in Phase 2 for better accuracy across demographics.
 
 ## Known Limitations (Phase 1)
 
-- **Face detection**: Haar Cascades struggle with:
-  - Profile views (only works well for frontal faces)
-  - Occlusions (masks, hands covering face)
-  - Poor lighting conditions
-  - Non-frontal angles > 30°
-
-  → Will upgrade to YOLOv8-face or RetinaFace in Phase 2
-
+- **Haar Cascade accuracy**: Struggles with profile views (>30°), occlusions, and poor lighting. Will upgrade to YOLOv8-face in Phase 2.
 - **No license plate detection yet** (Phase 2)
 - **No screen detection yet** (Phase 3)
-- **Webcam only** (video file upload coming in Phase 4)
+- **Webcam only** (video file upload in Phase 4)
+- **HuggingFace Spaces deployment**: The `cv2.VideoCapture` approach won't work in a cloud environment without a webcam. Phase 4 will add video file upload as the primary demo mode for Spaces.
 
 ## Project Structure
 
 ```
 anonymizer/
-├── app.py              # Gradio web interface
+├── app.py              # Gradio web interface + OpenCV capture loop
 ├── detector.py         # YOLOv8 wrapper with MPS support
 ├── anonymizer.py       # Blur/pixelate/blackout effects
 ├── utils.py            # FPS counter and frame helpers
+├── test_stream.py      # Minimal Gradio streaming diagnostic script
 ├── requirements.txt    # Pinned dependencies
-├── README.md          # This file
-├── models/            # Model weights (downloaded automatically)
+├── README.md           # This file
+├── PHASE_1_SUMMARY.md  # Phase 1 build log and decisions
+├── models/             # Model weights (downloaded automatically)
 │   └── .gitkeep
-├── notebooks/         # Colab training notebooks (Phase 2+)
-└── venv/              # Python 3.10 virtual environment
+└── venv/               # Python 3.14 virtual environment
 ```
 
 ## Dependencies
@@ -222,7 +223,7 @@ Core packages (see `requirements.txt` for full list):
 - `torch>=2.3.0` - PyTorch with MPS backend
 - `torchvision>=0.18.0` - Vision utilities
 - `ultralytics>=8.3.0` - YOLOv8 implementation
-- `opencv-python>=4.10.0` - Computer vision primitives
+- `opencv-python>=4.10.0` - Computer vision + webcam capture
 - `gradio>=4.44.0` - Web interface
 - `numpy>=1.26.0` - Numerical computing
 
@@ -233,22 +234,9 @@ Core packages (see `requirements.txt` for full list):
 - [ ] **Phase 3**: Screen/monitor detection (Week 2)
 - [ ] **Phase 4**: Polish, deploy, and ship (Week 2)
 
-## Model Card
-
-Coming in Phase 4 - will include:
-- Training data sources and labeling methodology
-- Evaluation metrics (mAP@50, FPS benchmarks)
-- Intended use and limitations
-- Bias analysis and fairness considerations
-- Privacy statement
-
-## Contributing
-
-This is a portfolio project, but feedback and suggestions are welcome! Open an issue or reach out.
-
 ## License
 
-MIT License - feel free to use this code for your own projects.
+MIT License — feel free to use this code for your own projects.
 
 ## Acknowledgments
 
