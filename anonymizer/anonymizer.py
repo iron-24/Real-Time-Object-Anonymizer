@@ -80,8 +80,9 @@ class Anonymizer:
         """
         Apply Gaussian blur to ROI.
 
-        [INTERVIEW TALKING POINT]: Kernel size scales with bbox area and intensity.
-        This ensures small faces get appropriately blurred without over-blurring large regions.
+        [INTERVIEW TALKING POINT]: Kernel size scales with intensity using a more aggressive
+        formula (intensity * 7) to ensure strong anonymization. At max intensity (10),
+        kernel size is 71, providing thorough blurring that makes facial features unrecognizable.
 
         Args:
             roi: Region of interest to blur.
@@ -90,16 +91,18 @@ class Anonymizer:
         Returns:
             Blurred ROI.
         """
-        # Calculate kernel size based on intensity and ROI size
-        # Kernel size must be odd and positive
-        kernel_size = max(3, int(intensity * 2) + 1)
+        # Calculate kernel size with stronger scaling
+        # intensity=1 → kernel=9, intensity=10 → kernel=71
+        kernel_size = max(9, int(intensity * 7) + 1)
 
         # Ensure kernel size is odd
         if kernel_size % 2 == 0:
             kernel_size += 1
 
-        # Apply Gaussian blur
-        blurred = cv2.GaussianBlur(roi, (kernel_size, kernel_size), 0)
+        # Apply Gaussian blur with explicit sigma for stronger effect
+        # Sigma = kernel_size / 3 gives a strong blur
+        sigma = kernel_size / 3.0
+        blurred = cv2.GaussianBlur(roi, (kernel_size, kernel_size), sigma)
 
         return blurred
 
