@@ -1,9 +1,5 @@
 """
 Object detection module using YOLOv8 with Apple Silicon MPS support.
-
-[INTERVIEW TALKING POINT]: YOLOv8 nano chosen over larger variants (small/medium/large)
-for real-time inference speed while maintaining acceptable accuracy for anonymization use case.
-The tradeoff: ~2-3% lower mAP but 3-5x faster inference on MPS.
 """
 
 from pathlib import Path
@@ -62,17 +58,11 @@ class AnonymizerDetector:
 
         self.model = YOLO(model_path)
 
-        # Move model to device
-        # [INTERVIEW TALKING POINT]: Ultralytics handles device placement internally,
-        # but we explicitly verify MPS availability to provide CPU fallback for non-Apple machines
         print(f"[Detector] Loaded {model_path} on device: {self.device}")
 
     def _setup_device(self, device: Optional[str] = None) -> str:
         """
         Auto-detect best available device: MPS (Apple Silicon) > CPU.
-
-        [INTERVIEW TALKING POINT]: MPS backend provides 2-3x speedup over CPU on M-series chips
-        for YOLOv8 inference. Fallback to CPU ensures portability across platforms.
 
         Args:
             device: Explicitly specified device, or None for auto-detection.

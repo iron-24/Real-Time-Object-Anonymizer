@@ -41,3 +41,6 @@ htmlcov/
 # Gradio
 gradio_cached_examples/
 flagged/
+
+# Interview preparation materials (private, not for GitHub)
+interview_prep/

@@ -4,9 +4,6 @@ Real-Time Object Anonymizer - Gradio Web Interface
 A portfolio project demonstrating real-time computer vision for privacy protection.
 Detects and anonymizes faces, license plates, and screens in webcam/video streams.
 
-[INTERVIEW TALKING POINT]: Gradio chosen over custom React UI for rapid prototyping
-and deployment. Provides professional UI with real-time display out of the box.
-
 Architecture note: In Gradio 6.x the browser webcam component sends individual
 snapshots, not a continuous stream. We capture directly from the camera using
 OpenCV (cv2.VideoCapture) and push processed frames to the UI via gr.Timer.
@@ -87,11 +84,6 @@ class AnonymizerApp:
     def detect_faces(self, frame: np.ndarray) -> list:
         """
         Detect faces using Haar Cascade (Phase 1 implementation).
-
-        [INTERVIEW TALKING POINT]: Using Haar Cascades for Phase 1 because:
-        1. Zero-cost inference (CPU-based, no GPU needed for this part)
-        2. Fast enough for real-time (< 5ms per frame)
-        3. Good enough for MVP — will upgrade to YOLOv8-face in Phase 2
 
         Args:
             frame: Input frame in BGR format.

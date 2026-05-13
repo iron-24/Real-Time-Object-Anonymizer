@@ -105,10 +105,6 @@ def resize_frame(
     """
     Resize frame while maintaining aspect ratio.
 
-    [INTERVIEW TALKING POINT]: We process frames at 480p for detection to reduce
-    latency, then upscale results to display resolution. This trades a small amount
-    of detection accuracy (~1-2% mAP) for 2-3x faster inference.
-
     Args:
         frame: Input frame.
         target_width: Target width (maintains aspect ratio if height not specified).

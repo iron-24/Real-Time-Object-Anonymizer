@@ -1,9 +1,5 @@
 """
 Anonymization effects module for blurring, pixelating, or redacting detected objects.
-
-[INTERVIEW TALKING POINT]: Pixelation effect uses bilinear downsampling + nearest-neighbor
-upsampling to create the classic "pixelated" look. This is perceptually effective for
-anonymization while being computationally cheaper than advanced mosaic algorithms.
 """
 
 from enum import Enum
@@ -80,10 +76,6 @@ class Anonymizer:
         """
         Apply Gaussian blur to ROI.
 
-        [INTERVIEW TALKING POINT]: Kernel size scales with intensity using a more aggressive
-        formula (intensity * 7) to ensure strong anonymization. At max intensity (10),
-        kernel size is 71, providing thorough blurring that makes facial features unrecognizable.
-
         Args:
             roi: Region of interest to blur.
             intensity: Blur intensity (1-10).
@@ -110,11 +102,6 @@ class Anonymizer:
     def _apply_pixelate(roi: np.ndarray, intensity: int) -> np.ndarray:
         """
         Apply pixelation effect to ROI.
-
-        [INTERVIEW TALKING POINT]: This uses a two-step resize: first downscale with bilinear
-        interpolation, then upscale with nearest-neighbor. The nearest-neighbor upscaling
-        preserves the blocky "pixel" appearance. This approach is 10x faster than mosaic
-        algorithms while achieving similar perceptual anonymization.
 
         Args:
             roi: Region of interest to pixelate.
